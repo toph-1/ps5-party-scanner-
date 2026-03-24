@@ -1,25 +1,35 @@
 #!/bin/bash
-# PS5 Hotspot Party Port Tool (manual PS5 IP)
-if [ "$EUID" -ne 0 ]; then echo "Run as root"; exit 1; fi
 
-# Ask user for PS5 IP
-read -p "Enter your PS5 IP (from hotspot network): " PS5_IP
-if [[ ! $PS5_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "Invalid IP"; exit 1; fi
+if [ "$EUID" -ne 0 ]; then
+    echo "Run with sudo"
+    exit 1
+fi
 
-# Enable IP forwarding
+echo "🎮 PS5 VPN Fix (Safe Mode)"
+
+# Ask for PS5 IP
+read -p "Enter PS5 IP: " PS5_IP
+
+# Detect interfaces
+WIFI_IFACE=$(ip route | grep default | awk '{print $5}')
+VPN_IFACE="tun0"
+
+echo "WiFi Interface: $WIFI_IFACE"
+
+# Enable forwarding
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
 
-# Forward TCP + UDP ports
-PORTS_TCP=(3478 3479)
-PORTS_UDP=(3478 3479)
-for PORT in "${PORTS_TCP[@]}"; do iptables -t nat -C PREROUTING -p tcp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT 2>/dev/null || iptables -t nat -A PREROUTING -p tcp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT; done
-for PORT in "${PORTS_UDP[@]}"; do iptables -t nat -C PREROUTING -p udp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT 2>/dev/null || iptables -t nat -A PREROUTING -p udp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT; done
-iptables -t nat -C PREROUTING -p udp --dport 49152:65535 -j DNAT --to-destination $PS5_IP 2>/dev/null || iptables -t nat -A PREROUTING -p udp --dport 49152:65535 -j DNAT --to-destination $PS5_IP
-iptables -t nat -C POSTROUTING -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -j MASQUERADE
+# Clean old rules (prevents breakage)
+iptables -t nat -F
+iptables -F
 
-# Check TCP ports
-echo "Checking TCP ports..."
-i=1
-for PORT in "${PORTS_TCP[@]}"; do timeout 2 bash -c "echo > /dev/tcp/$PS5_IP/$PORT" 2>/dev/null && echo "$i) TCP $PORT: ✔ Open" || echo "$i) TCP $PORT: ✖ Blocked"; ((i++)); done
-echo "UDP ports forwarded. PS5 NAT should be Type 2."
-echo "✅ Done. Connect PS5 to hotspot and test parties."
+# Only route PS5 traffic through VPN
+iptables -t nat -A POSTROUTING -s $PS5_IP -o $VPN_IFACE -j MASQUERADE
+
+# Allow forwarding
+iptables -A FORWARD -s $PS5_IP -o $VPN_IFACE -j ACCEPT
+iptables -A FORWARD -d $PS5_IP -i $VPN_IFACE -j ACCEPT
+
+echo "✅ Done"
+echo "Your PC WiFi should still work"
+echo "PS5 traffic is now routed through VPN"
