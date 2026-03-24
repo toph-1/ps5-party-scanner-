@@ -1,53 +1,84 @@
 #!/bin/bash
 
-clear
-echo "🎮 PS5 Party Fix Tool (P2P Focused)"
-echo "==================================="
+# ===============================
+# PS5 Party Hotspot Setup Tool
+# ===============================
 
-# Detect connection type
-IFACE=$(ip route | grep default | awk '{print $5}')
-if [[ "$IFACE" == wl* ]]; then
-  echo "⚠ You are on WiFi"
-  echo "👉 Recommendation: Use Ethernet for stable parties"
-else
-  echo "✔ Using Ethernet"
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+  echo "⚠ Please run as root: sudo ./ps5_party_hotspot.sh"
+  exit 1
 fi
 
-# Internet check
-echo -e "\n[1] Internet Test..."
-ping -c 1 google.com >/dev/null 2>&1 && echo "✔ Internet OK" || echo "✖ No Internet"
+echo "🎮 PS5 Party Hotspot Setup Tool"
+echo "================================="
 
-# NAT hint
-LOCAL=$(hostname -I | awk '{print $1}')
-PUBLIC=$(curl -s ifconfig.me)
-echo -e "\n[2] NAT Check:"
-if [[ "$LOCAL" != "$PUBLIC" ]]; then
-  echo "⚠ You are behind NAT (likely NAT Type 3)"
-  echo "👉 Parties may disconnect or fail to join"
-else
-  echo "✔ NAT seems open"
-fi
+# -----------------------------
+# 1️⃣ Enable hotspot
+# -----------------------------
+SSID="PS5PartyHotspot"
+PASS="ps5party123"
 
-# Party ports test
-echo -e "\n[3] Party Ports Test (TCP 3478-3479)..."
+echo -e "\n[1] Setting up hotspot..."
+nmcli dev wifi hotspot ifname wlan0 ssid "$SSID" password "$PASS"
+
+# Get hotspot IP
+HOTSPOT_IP=$(ip addr show wlan0 | grep "inet " | awk '{print $2}' | cut -d/ -f1)
+echo "✔ Hotspot IP: $HOTSPOT_IP"
+echo "Connect your PS5 to this hotspot."
+
+# -----------------------------
+# 2️⃣ Enable IP forwarding
+# -----------------------------
+echo -e "\n[2] Enabling IP forwarding..."
+sysctl -w net.ipv4.ip_forward=1 >/dev/null
+echo "✔ IP forwarding enabled"
+
+# -----------------------------
+# 3️⃣ Forward PS5 Party Ports
+# -----------------------------
+echo -e "\n[3] Forwarding PS5 Party Ports..."
+
+PS5_IP=""
+while [[ ! $PS5_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; do
+  read -p "Enter your PS5 IP on the hotspot (check network settings on PS5): " PS5_IP
+done
+
+# TCP Ports
 for PORT in 3478 3479; do
-  timeout 2 bash -c "echo > /dev/tcp/playstation.com/$PORT" 2>/dev/null && \
+  iptables -t nat -A PREROUTING -p tcp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT
+done
+
+# UDP Ports
+for PORT in 3478 3479; do
+  iptables -t nat -A PREROUTING -p udp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT
+done
+
+# Dynamic UDP range
+iptables -t nat -A PREROUTING -p udp --dport 49152:65535 -j DNAT --to-destination $PS5_IP
+
+# Masquerade so packets can go out
+iptables -t nat -A POSTROUTING -j MASQUERADE
+
+echo "✔ Ports forwarded successfully!"
+
+# -----------------------------
+# 4️⃣ Quick Connectivity Check
+# -----------------------------
+echo -e "\n[4] Checking connectivity..."
+
+# Ping PS5 from hotspot
+ping -c 2 $PS5_IP >/dev/null 2>&1 && echo "✔ PS5 reachable from hotspot" || echo "✖ PS5 unreachable"
+
+# Test TCP ports
+for PORT in 3478 3479; do
+  timeout 2 bash -c "echo > /dev/tcp/$PS5_IP/$PORT" 2>/dev/null && \
     echo "✔ TCP $PORT reachable" || echo "✖ TCP $PORT blocked"
 done
 
-echo -e "\n[!] UDP 3478-3479 and 49152-65535 cannot be directly tested from bash."
-echo "Make sure UPnP is enabled or ports are forwarded on your router."
-
-# Step-by-step guidance
-echo -e "\n[4] Recommended Fixes:"
-echo "1. Use Ethernet instead of WiFi"
-echo "2. Enable UPnP on your router (T-Mobile gateways: check 'UPnP' in settings)"
-echo "3. Set DNS manually on PS5:"
-echo "   - Primary DNS: 8.8.8.8"
-echo "   - Secondary DNS: 1.1.1.1"
-echo "4. Restart router and PS5 after changes"
-echo "5. If still blocked: T-Mobile CGNAT is preventing full P2P"
-echo "   - Options: Use a VPN that supports port forwarding OR switch to ISP with public IP"
-
 echo -e "\n==============================="
-echo "Done. Follow the above steps for stable party connections."
+echo "✅ Hotspot ready for PS5 parties!"
+echo "SSID: $SSID"
+echo "Password: $PASS"
+echo "Connect your PS5 and NAT/ports should be open."
+echo "Note: UDP ports cannot be tested from bash but are forwarded."
