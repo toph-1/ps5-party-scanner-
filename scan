@@ -1,44 +1,80 @@
 #!/bin/bash
 
 clear
-echo "🎮 PS5 Passive Network Check"
-echo "==========================="
+echo "🎮 PS5 CONNECTION FIX TOOL"
+echo "=========================="
 
-# Get local IP
+fail=0
 
-echo -e "\n[1] Local IP:"
-hostname -I
+# 1. Internet
 
-# Get public IP
-
-echo -e "\n[2] Public IP:"
-curl -s ifconfig.me && echo ""
-
-# Check if behind NAT (simple hint)
-
-echo -e "\n[3] NAT Check:"
-LOCAL_IP=$(hostname -I | awk '{print $1}')
-PUBLIC_IP=$(curl -s ifconfig.me)
-
-if [[ "$LOCAL_IP" == "$PUBLIC_IP" ]]; then
-echo "✔ Likely Open NAT (rare)"
+echo -e "\n[1] Internet Check..."
+if ping -c 1 google.com >/dev/null 2>&1; then
+echo "✔ Internet OK"
 else
-echo "⚠ Behind NAT (normal for home networks)"
+echo "✖ Internet NOT working"
+fail=1
 fi
 
-# Check internet
+# 2. DNS
 
-echo -e "\n[4] Internet:"
-ping -c 1 google.com >/dev/null 2>&1 && 
-echo "✔ Online" || echo "✖ Offline"
+echo -e "\n[2] DNS Check..."
+if ping -c 1 playstation.com >/dev/null 2>&1; then
+echo "✔ DNS OK"
+else
+echo "✖ DNS Issue"
+echo "👉 Fix: Set DNS to 8.8.8.8 and 1.1.1.1 on your PS5"
+fail=1
+fi
 
-# Show useful advice
+# 3. NAT hint
 
-echo -e "\n[5] Tips:"
-echo "- For PS5 parties, aim for NAT Type 2"
-echo "- Enable UPnP in your router"
-echo "- Or forward ports: 3478-3480"
-echo "- Use Ethernet if possible"
+echo -e "\n[3] NAT Check..."
+LOCAL=$(hostname -I | awk '{print $1}')
+PUBLIC=$(curl -s ifconfig.me)
 
-echo -e "\n==========================="
+if [[ "$LOCAL" == "$PUBLIC" ]]; then
+echo "✔ Open NAT (rare)"
+else
+echo "⚠ Behind NAT (normal)"
+echo "👉 If you're disconnecting, you may have STRICT NAT"
+fi
+
+# 4. PSN Port Reachability
+
+echo -e "\n[4] PSN Port Test..."
+HOST="playstation.com"
+
+open_count=0
+
+for PORT in 3478 3479 3480; do
+timeout 2 bash -c "echo > /dev/tcp/$HOST/$PORT" 2>/dev/null && {
+echo "✔ Port $PORT reachable"
+((open_count++))
+} || {
+echo "✖ Port $PORT blocked"
+}
+done
+
+# 5. Final diagnosis
+
+echo -e "\n[5] RESULT:"
+if [ $fail -eq 1 ]; then
+echo "❌ Basic connection issue detected"
+elif [ $open_count -lt 2 ]; then
+echo "⚠ Likely NAT/port issue"
+echo "👉 FIX THIS:"
+echo "   1. Enable UPnP in your router (BEST FIX)"
+echo "   2. OR port forward:"
+echo "      TCP: 80, 443, 3478-3480"
+echo "      UDP: 3478-3479"
+echo "   3. Restart router + PS5"
+else
+echo "✔ Network looks OK"
+echo "👉 If still disconnecting:"
+echo "   - Use Ethernet (not WiFi)"
+echo "   - Check for double NAT (modem + router)"
+fi
+
+echo -e "\n=========================="
 echo "Done."
