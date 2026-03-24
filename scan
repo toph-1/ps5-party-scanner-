@@ -1,8 +1,8 @@
 #!/bin/bash
 
 clear
-echo "🎮 PS5 Party Connectivity Checker (P2P Only)"
-echo "============================================"
+echo "🎮 PS5 Party Fix Tool (P2P Focused)"
+echo "==================================="
 
 # Detect connection type
 IFACE=$(ip route | grep default | awk '{print $5}')
@@ -15,7 +15,7 @@ fi
 
 # Internet check
 echo -e "\n[1] Internet Test..."
-ping -c 1 google.com >/dev/null 2>&1 && echo "✔ Internet OK" || echo "✖ Internet NOT working"
+ping -c 1 google.com >/dev/null 2>&1 && echo "✔ Internet OK" || echo "✖ No Internet"
 
 # NAT hint
 LOCAL=$(hostname -I | awk '{print $1}')
@@ -38,12 +38,16 @@ done
 echo -e "\n[!] UDP 3478-3479 and 49152-65535 cannot be directly tested from bash."
 echo "Make sure UPnP is enabled or ports are forwarded on your router."
 
-# Quick advice
+# Step-by-step guidance
 echo -e "\n[4] Recommended Fixes:"
-echo "- Use Ethernet instead of WiFi"
-echo "- Enable UPnP on your router"
-echo "- If T-Mobile CGNAT: consider VPN or different ISP"
-echo "- Restart router + PS5 after changes"
+echo "1. Use Ethernet instead of WiFi"
+echo "2. Enable UPnP on your router (T-Mobile gateways: check 'UPnP' in settings)"
+echo "3. Set DNS manually on PS5:"
+echo "   - Primary DNS: 8.8.8.8"
+echo "   - Secondary DNS: 1.1.1.1"
+echo "4. Restart router and PS5 after changes"
+echo "5. If still blocked: T-Mobile CGNAT is preventing full P2P"
+echo "   - Options: Use a VPN that supports port forwarding OR switch to ISP with public IP"
 
 echo -e "\n==============================="
-echo "Done. This checks only PS5 party connectivity (P2P)."
+echo "Done. Follow the above steps for stable party connections."
