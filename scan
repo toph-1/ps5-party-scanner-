@@ -1,7 +1,7 @@
 #!/bin/bash
 # ========================================
-# PS5 Party Ports Auto-Unblock Tool
-# Works on existing WiFi, Ubuntu
+# PS5 Party Auto-Port Tool (Ubuntu)
+# Installs dependencies if needed
 # ========================================
 
 # Must be run as root
@@ -11,81 +11,76 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 clear
-echo "🎮 PS5 Party Port Fix Tool (Ubuntu)"
+echo "🎮 PS5 Party Auto-Port Tool (Ubuntu)"
 echo "======================================"
 
-# 1️⃣ Detect local network interface
+# 1️⃣ Check dependencies
+DEPS=(iptables curl nmcli)
+echo -e "\n[1] Checking dependencies..."
+for pkg in "${DEPS[@]}"; do
+    if ! command -v $pkg >/dev/null 2>&1; then
+        echo "⚠ $pkg not found. Installing..."
+        apt update && apt install -y $pkg
+    else
+        echo "✔ $pkg installed"
+    fi
+done
+
+# 2️⃣ Detect network interface
 IFACE=$(ip route | grep default | awk '{print $5}')
 IP_ADDR=$(ip addr show $IFACE | grep "inet " | awk '{print $2}' | cut -d/ -f1)
-echo -e "\n[1] Network Interface: $IFACE"
+echo -e "\n[2] Network Interface: $IFACE"
 echo "Local IP: $IP_ADDR"
 
-# 2️⃣ Detect PS5 IP automatically (via ping sweep)
-echo -e "\n[2] Detecting PS5 on your LAN..."
+# 3️⃣ Detect PS5 IP automatically (LAN scan)
+echo -e "\n[3] Detecting PS5 on LAN..."
 PS5_IP=""
 for i in $(seq 1 254); do
     ping -c 1 -W 1 "${IP_ADDR%.*}.$i" >/dev/null 2>&1
     MAC=$(arp -n "${IP_ADDR%.*}.$i" | awk '/[0-9a-f]{2}:/ {print $3}')
-    # common PS5 MAC prefix: 00:1a:79 or 00:04:3e or 44:65:0d
     if [[ "$MAC" =~ ^(00:1a:79|00:04:3e|44:65:0d) ]]; then
         PS5_IP="${IP_ADDR%.*}.$i"
         break
     fi
 done
 
-# fallback to manual input if not found
 if [ -z "$PS5_IP" ]; then
     read -p "Could not detect PS5 automatically. Enter PS5 IP manually: " PS5_IP
 fi
+echo "PS5 IP: $PS5_IP"
 
-echo "Detected PS5 IP: $PS5_IP"
-
-# 3️⃣ Enable IP forwarding
-echo -e "\n[3] Enabling IP forwarding..."
+# 4️⃣ Enable IP forwarding
+echo -e "\n[4] Enabling IP forwarding..."
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
 echo "✔ IP forwarding enabled"
 
-# 4️⃣ Forward TCP and UDP ports for parties
-echo -e "\n[4] Forwarding PS5 Party Ports..."
+# 5️⃣ Forward PS5 Party Ports (TCP + UDP)
+echo -e "\n[5] Forwarding TCP/UDP ports..."
 PORTS_TCP=(3478 3479)
 PORTS_UDP=(3478 3479)
-
-# TCP forwarding
 for PORT in "${PORTS_TCP[@]}"; do
     iptables -t nat -C PREROUTING -p tcp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT 2>/dev/null || \
     iptables -t nat -A PREROUTING -p tcp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT
 done
-
-# UDP forwarding
 for PORT in "${PORTS_UDP[@]}"; do
     iptables -t nat -C PREROUTING -p udp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT 2>/dev/null || \
     iptables -t nat -A PREROUTING -p udp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT
 done
-
-# UDP dynamic range
 iptables -t nat -C PREROUTING -p udp --dport 49152:65535 -j DNAT --to-destination $PS5_IP 2>/dev/null || \
 iptables -t nat -A PREROUTING -p udp --dport 49152:65535 -j DNAT --to-destination $PS5_IP
+iptables -t nat -C POSTROUTING -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -j MASQUERADE
+echo "✔ Ports forwarded successfully"
 
-# Masquerade for outgoing packets
-iptables -t nat -C POSTROUTING -j MASQUERADE 2>/dev/null || \
-iptables -t nat -A POSTROUTING -j MASQUERADE
-
-echo "✔ Ports forwarded successfully!"
-
-# 5️⃣ Connectivity check
-echo -e "\n[5] Checking TCP Ports on PS5..."
+# 6️⃣ Connectivity check
+echo -e "\n[6] Checking TCP Ports..."
 i=1
 for PORT in "${PORTS_TCP[@]}"; do
     timeout 2 bash -c "echo > /dev/tcp/$PS5_IP/$PORT" 2>/dev/null && \
     echo "$i) TCP $PORT: ✔ Open" || echo "$i) TCP $PORT: ✖ Blocked"
     ((i++))
 done
+echo -e "\n[7] UDP Ports cannot be tested directly. They are forwarded internally."
+echo "PS5 NAT should now be Type 2 for parties."
 
-echo -e "\n[6] UDP Ports (cannot test directly in bash)"
-echo "UDP 3478-3479 and 49152-65535 forwarded. Ensure PS5 NAT is Type 2."
-
-# 6️⃣ Final message
 echo -e "\n==============================="
-echo "✅ PS5 Party ports should now be unblocked."
-echo "Connect your PS5 to WiFi and check party chat."
-echo "If NAT Type is still 3, consider Ethernet or VPN workaround."
+echo "✅ Setup complete. Connect your PS5 and test party chat."
