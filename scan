@@ -1,91 +1,25 @@
 #!/bin/bash
-# ========================================
-# PS5 Hotspot Party Port Tool (Ubuntu)
-# Fully automated for hotspot networks
-# ========================================
+# PS5 Hotspot Party Port Tool (manual PS5 IP)
+if [ "$EUID" -ne 0 ]; then echo "Run as root"; exit 1; fi
 
-# Must run as root
-if [ "$EUID" -ne 0 ]; then
-    echo "⚠ Run as root: sudo ./ps5_hotspot.sh"
-    exit 1
-fi
+# Ask user for PS5 IP
+read -p "Enter your PS5 IP (from hotspot network): " PS5_IP
+if [[ ! $PS5_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "Invalid IP"; exit 1; fi
 
-clear
-echo "🎮 PS5 Hotspot Party Port Tool (Ubuntu)"
-echo "======================================"
-
-# 1️⃣ Install dependencies if missing
-DEPS=(iptables curl nmcli net-tools)
-for pkg in "${DEPS[@]}"; do
-    if ! command -v $pkg >/dev/null 2>&1; then
-        echo "⚠ $pkg not found. Installing..."
-        apt update && apt install -y $pkg
-    else
-        echo "✔ $pkg installed"
-    fi
-done
-
-# 2️⃣ Detect hotspot interface (the one sharing internet)
-HOTSPOT_IFACE=$(nmcli dev status | grep "wifi" | grep "connected" | awk '{print $1}')
-IP_ADDR=$(ip addr show $HOTSPOT_IFACE | grep "inet " | awk '{print $2}' | cut -d/ -f1)
-echo -e "\n[1] Hotspot Interface: $HOTSPOT_IFACE"
-echo "Local IP: $IP_ADDR"
-
-# 3️⃣ Detect PS5 IP automatically
-echo -e "\n[2] Detecting PS5 on hotspot network..."
-PS5_IP=""
-for i in $(seq 2 254); do
-    ping -c 1 -W 1 "${IP_ADDR%.*}.$i" >/dev/null 2>&1
-    MAC=$(ip neigh | grep "${IP_ADDR%.*}.$i" | awk '{print $5}')
-    if [[ "$MAC" =~ ^(00:1a:79|00:04:3e|44:65:0d) ]]; then
-        PS5_IP="${IP_ADDR%.*}.$i"
-        break
-    fi
-done
-
-if [ -z "$PS5_IP" ]; then
-    read -p "Could not detect PS5 automatically. Enter PS5 IP manually: " PS5_IP
-fi
-echo "PS5 IP: $PS5_IP"
-
-# 4️⃣ Enable IP forwarding
-echo -e "\n[3] Enabling IP forwarding..."
+# Enable IP forwarding
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
-echo "✔ IP forwarding enabled"
 
-# 5️⃣ Forward TCP + UDP ports
-echo -e "\n[4] Forwarding PS5 party ports..."
+# Forward TCP + UDP ports
 PORTS_TCP=(3478 3479)
 PORTS_UDP=(3478 3479)
-for PORT in "${PORTS_TCP[@]}"; do
-    iptables -t nat -C PREROUTING -p tcp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT 2>/dev/null || \
-    iptables -t nat -A PREROUTING -p tcp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT
-done
-for PORT in "${PORTS_UDP[@]}"; do
-    iptables -t nat -C PREROUTING -p udp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT 2>/dev/null || \
-    iptables -t nat -A PREROUTING -p udp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT
-done
-iptables -t nat -C PREROUTING -p udp --dport 49152:65535 -j DNAT --to-destination $PS5_IP 2>/dev/null || \
-iptables -t nat -A PREROUTING -p udp --dport 49152:65535 -j DNAT --to-destination $PS5_IP
+for PORT in "${PORTS_TCP[@]}"; do iptables -t nat -C PREROUTING -p tcp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT 2>/dev/null || iptables -t nat -A PREROUTING -p tcp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT; done
+for PORT in "${PORTS_UDP[@]}"; do iptables -t nat -C PREROUTING -p udp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT 2>/dev/null || iptables -t nat -A PREROUTING -p udp --dport $PORT -j DNAT --to-destination $PS5_IP:$PORT; done
+iptables -t nat -C PREROUTING -p udp --dport 49152:65535 -j DNAT --to-destination $PS5_IP 2>/dev/null || iptables -t nat -A PREROUTING -p udp --dport 49152:65535 -j DNAT --to-destination $PS5_IP
 iptables -t nat -C POSTROUTING -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -j MASQUERADE
-echo "✔ Ports forwarded successfully"
 
-# 6️⃣ TCP Connectivity Check
-echo -e "\n[5] Checking TCP Ports..."
+# Check TCP ports
+echo "Checking TCP ports..."
 i=1
-for PORT in "${PORTS_TCP[@]}"; do
-    timeout 2 bash -c "echo > /dev/tcp/$PS5_IP/$PORT" 2>/dev/null && \
-    echo "$i) TCP $PORT: ✔ Open" || echo "$i) TCP $PORT: ✖ Blocked"
-    ((i++))
-done
-
-# UDP guidance
-echo -e "\n[6] UDP Ports (cannot test directly in bash)"
-echo "UDP 3478-3479 and 49152-65535 forwarded internally."
-echo "Check PS5 NAT type. Should be Type 2 for parties."
-
-# ✅ Final message
-echo -e "\n==============================="
-echo "✅ Setup complete!"
-echo "Connect your PS5 to the hotspot and test party chat."
-echo "If NAT Type is still 3, consider Ethernet or VPN workaround."
+for PORT in "${PORTS_TCP[@]}"; do timeout 2 bash -c "echo > /dev/tcp/$PS5_IP/$PORT" 2>/dev/null && echo "$i) TCP $PORT: ✔ Open" || echo "$i) TCP $PORT: ✖ Blocked"; ((i++)); done
+echo "UDP ports forwarded. PS5 NAT should be Type 2."
+echo "✅ Done. Connect PS5 to hotspot and test parties."
