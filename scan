@@ -1,35 +1,103 @@
 #!/bin/bash
 
+# ===============================
+# PS5 Hotspot Tool (Safe Version)
+# ===============================
+
 if [ "$EUID" -ne 0 ]; then
-    echo "Run with sudo"
+    echo "Run with: sudo ./ps5_tool.sh"
     exit 1
 fi
 
-echo "🎮 PS5 VPN Fix (Safe Mode)"
+clear
+echo "🎮 PS5 Hotspot Tool"
+echo "=============================="
+echo "1) Basic Fix (No VPN)"
+echo "2) VPN Mode (Optional)"
+echo "3) Reset Network (Fix breaks)"
+echo "=============================="
 
-# Ask for PS5 IP
-read -p "Enter PS5 IP: " PS5_IP
+read -p "Choose option: " choice
 
-# Detect interfaces
+# Detect interface
 WIFI_IFACE=$(ip route | grep default | awk '{print $5}')
-VPN_IFACE="tun0"
 
-echo "WiFi Interface: $WIFI_IFACE"
+case $choice in
 
-# Enable forwarding
-sysctl -w net.ipv4.ip_forward=1 >/dev/null
+# -------------------------------
+# 1️⃣ BASIC MODE (NO VPN)
+# -------------------------------
+1)
+    echo "Running basic fix..."
 
-# Clean old rules (prevents breakage)
-iptables -t nat -F
-iptables -F
+    read -p "Enter PS5 IP: " PS5_IP
 
-# Only route PS5 traffic through VPN
-iptables -t nat -A POSTROUTING -s $PS5_IP -o $VPN_IFACE -j MASQUERADE
+    # Enable forwarding
+    sysctl -w net.ipv4.ip_forward=1 >/dev/null
 
-# Allow forwarding
-iptables -A FORWARD -s $PS5_IP -o $VPN_IFACE -j ACCEPT
-iptables -A FORWARD -d $PS5_IP -i $VPN_IFACE -j ACCEPT
+    # Clean rules (prevents WiFi break)
+    iptables -F
+    iptables -t nat -F
 
-echo "✅ Done"
-echo "Your PC WiFi should still work"
-echo "PS5 traffic is now routed through VPN"
+    # Safe NAT for hotspot
+    iptables -t nat -A POSTROUTING -o $WIFI_IFACE -j MASQUERADE
+
+    echo "✅ Basic fix applied"
+    echo "⚠ NAT Type may still be 3 (normal on T-Mobile)"
+    echo "Try PS5 party now"
+;;
+
+# -------------------------------
+# 2️⃣ VPN MODE (OPTIONAL)
+# -------------------------------
+2)
+    echo "VPN mode..."
+
+    read -p "Enter PS5 IP: " PS5_IP
+    read -p "Enter path to .ovpn file: " VPN_CONF
+
+    if [ ! -f "$VPN_CONF" ]; then
+        echo "Invalid VPN file"
+        exit 1
+    fi
+
+    # Start VPN
+    openvpn --config "$VPN_CONF" --daemon
+
+    echo "Waiting for VPN..."
+    sleep 10
+
+    # Enable forwarding
+    sysctl -w net.ipv4.ip_forward=1 >/dev/null
+
+    # Clean rules
+    iptables -F
+    iptables -t nat -F
+
+    # Route ONLY PS5 through VPN
+    iptables -t nat -A POSTROUTING -s $PS5_IP -o tun0 -j MASQUERADE
+    iptables -A FORWARD -s $PS5_IP -o tun0 -j ACCEPT
+    iptables -A FORWARD -d $PS5_IP -i tun0 -j ACCEPT
+
+    echo "✅ VPN mode active"
+    echo "PS5 now using VPN"
+;;
+
+# -------------------------------
+# 3️⃣ RESET NETWORK
+# -------------------------------
+3)
+    echo "Resetting network..."
+
+    iptables -F
+    iptables -t nat -F
+    systemctl restart NetworkManager
+
+    echo "✅ Network reset complete"
+;;
+
+*)
+    echo "Invalid option"
+;;
+
+esac
